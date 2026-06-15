@@ -1,50 +1,72 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from database import engine, SessionLocal, Base
+from models import Todo as TodoModel
 
 app = FastAPI()
 
-class Todo(BaseModel):
-	id : int = 0
-	title : str
-	description : str
-	done : bool = False
-	priority : str = "medium"
+Base.metadata.create_all(bind=engine)
 
-todos = []
+class Todo(BaseModel):
+    title: str
+    description: str
+    done: bool = False
+    priority: str = "medium"
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 @app.get("/")
 def root():
-	return {"message" : "todo api is running."}
+    return {"message": "todo api is running"}
 
 @app.get("/todos")
-def get_todos():
-	return todos
+def get_todos(db: Session = Depends(get_db)):
+    return db.query(TodoModel).all()
 
 @app.post("/todos")
-def create_todo(todo : Todo):
-	todo.id = len(todos)
-	todos.append(todo)
-	return {"message" : "todo api is created."}
+def create_todo(todo: Todo, db: Session = Depends(get_db)):
+    db_todo = TodoModel(
+        title=todo.title,
+        description=todo.description,
+        done=todo.done,
+        priority=todo.priority
+    )
+    db.add(db_todo)
+    db.commit()
+    db.refresh(db_todo)
+    return db_todo
 
 @app.get("/todos/{todo_id}")
-def get_id(todo_id : int):
-	if todo_id >= len(todos):
-		return {"message" : "todo api doesnt exists"}
-	else:
-		return todos[todo_id]
+def get_todo(todo_id: int, db: Session = Depends(get_db)):
+    todo = db.query(TodoModel).filter(TodoModel.id == todo_id).first()
+    if not todo:
+        return {"error": "Todo not found"}
+    return todo
 
 @app.delete("/todos/{todo_id}")
-def del_todo(todo_id : int):
-	if todo_id >= len(todos):
-		return {"message" : "todo api doenst exists"}
-	else:
-		return todos.pop(todo_id)
+def delete_todo(todo_id: int, db: Session = Depends(get_db)):
+    todo = db.query(TodoModel).filter(TodoModel.id == todo_id).first()
+    if not todo:
+        return {"error": "Todo not found"}
+    db.delete(todo)
+    db.commit()
+    return {"message": "Todo deleted"}
 
 @app.put("/todos/{todo_id}")
-def add_todo(todo_id : int, up_todo : Todo):
-	if todo_id >= len(todos):
-		return {"message" : "todo api doesnt exists"}
-	else:
-		todos[todo_id] = up_todo
-		return {"message" : "Todo updated"}
-
+def update_todo(todo_id: int, updated: Todo, db: Session = Depends(get_db)):
+    todo = db.query(TodoModel).filter(TodoModel.id == todo_id).first()
+    if not todo:
+        return {"error": "Todo not found"}
+    todo.title = updated.title
+    todo.description = updated.description
+    todo.done = updated.done
+    todo.priority = updated.priority
+    db.commit()
+    db.refresh(todo)
+    return todo
